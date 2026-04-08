@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "dev:client": "npm run dev --prefix qr-dashboard",
+    "dev:server": "npm run dev --prefix qr-dashboard-server",
+    "dev": "concurrently -k -s first \"npm run dev:server\" \"npm run dev:client\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
