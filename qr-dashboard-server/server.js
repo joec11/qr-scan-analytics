@@ -41,7 +41,7 @@ app.get("/api/scans", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   // console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Scans endpoint: http://localhost:${PORT}/api/scans`);
 });
