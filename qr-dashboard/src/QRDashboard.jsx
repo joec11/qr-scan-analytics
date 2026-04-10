@@ -23,15 +23,44 @@ function MetricCard({ label, value, sub }) {
   );
 }
 
-function formatDate(utcStr) {
-  const d = new Date(utcStr.replace(" ", "T"));
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+export function formatLocalDateTime(timeUtc, formatFields) {
+  if (!timeUtc) return "—";
+
+  const date = new Date(timeUtc);
+  if (isNaN(date.getTime())) return "Invalid date";
+
+  // Default date format options (if no `formatFields` provided)
+  const dateFormatOptions = {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  };
+
+  // If no `formatFields` passed or is empty, use all default options
+  const selectedOptions = formatFields && formatFields.length > 0
+    ? formatFields.reduce((acc, field) => {
+        if (dateFormatOptions[field]) {
+          acc[field] = dateFormatOptions[field];
+        }
+        return acc;
+      }, {})
+    : dateFormatOptions;  // Default to all options if `formatFields` is empty or undefined
+
+  // Format the date based on the selected fields
+  const formattedDate = new Intl.DateTimeFormat(undefined, selectedOptions).format(date);
+
+  // Return the formatted date with lowercase AM/PM
+  return formattedDate.replace(/\bAM\b/g, "am").replace(/\bPM\b/g, "pm");
 }
 
 function groupByDate(scans) {
   const map = {};
   scans.forEach((s) => {
-    const key = formatDate(s.time_utc);
+    const key = formatLocalDateTime(s.time_utc, ["month", "day"]);
     map[key] = (map[key] || 0) + 1;
   });
   return Object.entries(map)
@@ -74,21 +103,21 @@ export default function QRDashboard() {
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 900, margin: "0 auto", padding: "2rem 1rem" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>QR scan analytics</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>QR Scan Analytics</h1>
       <p style={{ fontSize: 13, color: "#888", marginBottom: "1.5rem" }}>
-        QR code <code style={{ fontSize: 12, background: "#f0f0f0", padding: "2px 6px", borderRadius: 4 }}>
+        QR Code <code style={{ fontSize: 12, background: "#f0f0f0", padding: "2px 6px", borderRadius: 4 }}>
           {scans[0]?.qr_code_id}
         </code>
       </p>
 
       {/* Metrics */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: "1.5rem" }}>
-        <MetricCard label="Total scans" value={data.count} sub="All time" />
+        <MetricCard label="Total scans" value={data.count} sub="All Time" />
         <MetricCard label="Unique scanners" value={uniqueScanners} sub="Distinct IDs" />
         <MetricCard
           label="Last scanned"
-          value={lastScan ? formatDate(lastScan.time_utc) : "—"}
-          sub={lastScan?.time_timezone_aware?.split(", ").pop() || ""}
+          value={lastScan ? formatLocalDateTime(lastScan.time_utc, ["year", "month", "day"]) : "—"}
+          sub={lastScan ? formatLocalDateTime(lastScan.time_utc, ["hour", "minute", "second"]) : "—"}
         />
         <MetricCard label="Top device" value={topDevice.split(" · ")[0]} sub={topDevice.split(" · ")[1] || ""} />
       </div>
@@ -96,7 +125,7 @@ export default function QRDashboard() {
       {/* Charts */}
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: "1.5rem" }}>
         <div style={{ border: "0.5px solid #e0e0e0", borderRadius: 12, padding: "1rem 1.25rem" }}>
-          <div style={{ fontSize: 13, color: "#888", marginBottom: "1rem" }}>Scans over time</div>
+          <div style={{ fontSize: 13, color: "#888", marginBottom: "1rem" }}>Scans Over Time</div>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={timeData}>
               <XAxis dataKey="date" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
@@ -128,7 +157,7 @@ export default function QRDashboard() {
 
       {/* Table */}
       <div style={{ border: "0.5px solid #e0e0e0", borderRadius: 12, padding: "1rem 1.25rem" }}>
-        <div style={{ fontSize: 13, color: "#888", marginBottom: "1rem" }}>Scan history</div>
+        <div style={{ fontSize: 13, color: "#888", marginBottom: "1rem" }}>Scan History</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
@@ -146,7 +175,7 @@ export default function QRDashboard() {
               {scans.map((s, i) => (
                 <tr key={s.id}>
                   <td style={{ padding: "10px", borderBottom: i < scans.length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
-                    {s.time_timezone_aware.replace("  ", " ")}
+                    {formatLocalDateTime(s.time_utc)}
                   </td>
                   <td style={{ padding: "10px", borderBottom: i < scans.length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
                     {s.device}
