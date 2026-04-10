@@ -102,7 +102,7 @@ export default function QRDashboard() {
   const topDevice = deviceData.sort((a, b) => b.value - a.value)[0]?.name || "—";
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 900, margin: "0 auto", padding: "2rem 1rem" }}>
+    <div style={{ fontFamily: "system-ui, sans-serif", margin: "0 auto", padding: "2rem 1rem" }}>
       <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>QR Scan Analytics</h1>
       <p style={{ fontSize: 13, color: "#888", marginBottom: "1.5rem" }}>
         QR Code <code style={{ fontSize: 12, background: "#f0f0f0", padding: "2px 6px", borderRadius: 4 }}>
