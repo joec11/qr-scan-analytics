@@ -1,49 +1,53 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from "recharts";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+import DOMPurify from "dompurify";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
 
 const COLORS = ["#378ADD", "#63b89e", "#E24B4A", "#EF9F27", "#7F77DD"];
 
-function MetricCard({ label, value, sub }) {
+function MetricCard({ label, value }) {
   return (
-    <div style={{
-      background: "var(--color-bg-secondary, #f5f5f5)",
-      borderRadius: 10,
-      padding: "1rem",
-      flex: "1 1 140px",
-    }}>
-      <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 500 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{sub}</div>}
+    <div style={{ background: "#f5f5f5", borderRadius: 10, padding: "1rem", flex: 1 }}>
+      <div style={{ fontSize: 11, color: "#888" }}>{label}</div>
+      <div style={{ fontSize: 22 }}>{value}</div>
     </div>
   );
 }
 
-function formatDate(utcStr) {
-  const d = new Date(utcStr.replace(" ", "T"));
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
 function groupByDate(scans) {
   const map = {};
+
   scans.forEach((s) => {
-    const key = formatDate(s.time_utc);
+    const date = new Date(s.time_utc);
+
+    const key = date.toLocaleDateString("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      year: "2-digit",
+    });
+
     map[key] = (map[key] || 0) + 1;
   });
+
   return Object.entries(map)
-    .map(([date, count]) => ({ date, count }))
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
+    .map(([date, count]) => ({
+      date,
+      count,
+      sortDate: new Date(date),
+    }))
+    .sort((a, b) => b.sortDate - a.sortDate)
+    .map(({ date, count }) => ({ date, count }));
 }
 
 function groupByDevice(scans) {
   const map = {};
   scans.forEach((s) => {
-    const parts = s.device.split(", ");
-    const key = parts.slice(0, 2).join(" · ");
+    const key = s.device?.split(",")[0] || "Unknown";
     map[key] = (map[key] || 0) + 1;
   });
   return Object.entries(map).map(([name, value]) => ({ name, value }));
@@ -51,92 +55,144 @@ function groupByDevice(scans) {
 
 export default function QRDashboard() {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [insights, setInsights] = useState("");
+  const [loadingInsights, setLoadingInsights] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/api/scans`)
       .then((r) => r.json())
-      .then((json) => { setData(json); setLoading(false); })
-      .catch((e) => { setError(e.message); setLoading(false); });
+      .then(setData)
+      .catch(console.error);
   }, []);
 
-  if (loading) return <div style={{ padding: "2rem", color: "#888" }}>Loading scan data…</div>;
-  if (error) return <div style={{ padding: "2rem", color: "#c00" }}>Error: {error}</div>;
-  if (!data) return null;
+  const scans = data?.results || [];
 
-  const scans = data.results || [];
+  const sortedScans = useMemo(
+    () => [...scans].sort((a, b) => new Date(b.time_utc) - new Date(a.time_utc)),
+    [scans]
+  );
+
   const uniqueScanners = new Set(scans.map((s) => s.scanner_id)).size;
-  const lastScan = scans[0];
-  const timeData = groupByDate(scans);
-  const deviceData = groupByDevice(scans);
-  const topDevice = deviceData.sort((a, b) => b.value - a.value)[0]?.name || "—";
+
+  const repeatRate = scans.length && data?.count
+    ? ((data.count - uniqueScanners) / data.count * 100).toFixed(1)
+    : "0";
+
+  const timeData = useMemo(() => groupByDate(scans), [scans]);
+  const deviceData = useMemo(() => groupByDevice(scans), [scans]);
+
+  const lastScan = sortedScans[0];
+
+  function generateInsights() {
+    setLoadingInsights(true);
+
+    fetch(`${API_URL}/api/insights`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ scans }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        setInsights(data.insights);
+        setLoadingInsights(false);
+      })
+      .catch(() => setLoadingInsights(false));
+  }
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 900, margin: "0 auto", padding: "2rem 1rem" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>QR scan analytics</h1>
+    <div style={{ padding: "2rem", fontFamily: "system-ui" }}>
+      <h1 style={{ marginBottom: "2rem" }}>QR Scan Analytics</h1>
       <p style={{ fontSize: 13, color: "#888", marginBottom: "1.5rem" }}>
-        QR code <code style={{ fontSize: 12, background: "#f0f0f0", padding: "2px 6px", borderRadius: 4 }}>
-          {scans[0]?.qr_code_id}
+        QR Code <code style={{ fontSize: 12, background: "#f0f0f0", padding: "2px 6px", borderRadius: 4 }}>
+          {scans?.[0]?.qr_code_id}
         </code>
       </p>
 
       {/* Metrics */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: "1.5rem" }}>
-        <MetricCard label="Total scans" value={data.count} sub="All time" />
-        <MetricCard label="Unique scanners" value={uniqueScanners} sub="Distinct IDs" />
+      <div style={{ display: "flex", gap: 10, marginBottom: "1.5rem" }}>
+        <MetricCard label="Total Scans" value={data?.count || 0} />
+        <MetricCard label="Unique Scanners" value={uniqueScanners} />
+        <MetricCard label="Repeat Rate" value={`${repeatRate}%`} />
         <MetricCard
-          label="Last scanned"
-          value={lastScan ? formatDate(lastScan.time_utc) : "—"}
-          sub={lastScan?.time_timezone_aware?.split(", ").pop() || ""}
+          label="Last Scan"
+          value={lastScan ? new Date(lastScan.time_utc).toLocaleString() : "—"}
         />
-        <MetricCard label="Top device" value={topDevice.split(" · ")[0]} sub={topDevice.split(" · ")[1] || ""} />
+      </div>
+
+      {/* AI Insights */}
+      <div style={{ marginBottom: "1.5rem" }}>
+        <button
+          onClick={generateInsights}
+          style={{
+            padding: "10px 14px",
+            borderRadius: 6,
+            border: "none",
+            background: "#378ADD",
+            color: "white",
+            cursor: "pointer",
+            fontSize: "13px",
+            fontWeight: 500,
+            transition: "0.2s ease",
+          }}
+          onMouseOver={(e) => (e.target.style.background = "#2f74c9")}
+          onMouseOut={(e) => (e.target.style.background = "#378ADD")}
+        >
+          Generate AI Insights
+        </button>
+
+        {loadingInsights && <p style={{ marginTop: "0.5rem" }}>Analyzing...</p>}
+
+        {insights && (
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: "13px",
+              lineHeight: 1.6,
+              color: "#333",
+            }}
+            dangerouslySetInnerHTML={{
+              __html: DOMPurify.sanitize(insights),
+            }}
+          />
+        )}
       </div>
 
       {/* Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: "1.5rem" }}>
-        <div style={{ border: "0.5px solid #e0e0e0", borderRadius: 12, padding: "1rem 1.25rem" }}>
-          <div style={{ fontSize: 13, color: "#888", marginBottom: "1rem" }}>Scans over time</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={timeData}>
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-              <Tooltip />
-              <Bar dataKey="count" fill="#378ADD" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+      <div style={{ display: "flex", gap: 20, marginBottom: "2rem" }}>
+        <ResponsiveContainer width="50%" height={300}>
+          <BarChart data={timeData}>
+            <XAxis dataKey="date" />
+            <YAxis />
+            <Tooltip />
+            <Bar dataKey="count" fill="#378ADD" />
+          </BarChart>
+        </ResponsiveContainer>
 
-        <div style={{ border: "0.5px solid #e0e0e0", borderRadius: 12, padding: "1rem 1.25rem" }}>
-          <div style={{ fontSize: 13, color: "#888", marginBottom: "1rem" }}>Devices</div>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie data={deviceData} dataKey="value" cx="50%" cy="50%" outerRadius={70} innerRadius={44}>
-                {deviceData.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Pie>
-              <Legend
-                iconType="square"
-                iconSize={10}
-                formatter={(value) => <span style={{ fontSize: 12, color: "#555" }}>{value}</span>}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
+        <ResponsiveContainer width="50%" height={300}>
+          <PieChart>
+            <Pie data={deviceData} dataKey="value">
+              {deviceData.map((_, i) => (
+                <Cell key={i} fill={COLORS[i % COLORS.length]} />
+              ))}
+            </Pie>
+            <Legend />
+          </PieChart>
+        </ResponsiveContainer>
       </div>
 
       {/* Table */}
       <div style={{ border: "0.5px solid #e0e0e0", borderRadius: 12, padding: "1rem 1.25rem" }}>
-        <div style={{ fontSize: 13, color: "#888", marginBottom: "1rem" }}>Scan history</div>
+        <div style={{ fontWeight: "bold", fontSize: 13, marginBottom: "0.25rem" }}>Scan History</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr>
                 {["Time", "Device", "Scanner ID", "Location"].map((h) => (
                   <th key={h} style={{
-                    textAlign: "left", padding: "8px 10px", fontSize: 11,
-                    fontWeight: 500, color: "#888", textTransform: "uppercase",
+                    padding: "8px 10px", fontSize: 11,
+                    fontWeight: 500, textTransform: "uppercase",
                     letterSpacing: "0.04em", borderBottom: "0.5px solid #e0e0e0"
                   }}>{h}</th>
                 ))}
@@ -146,7 +202,7 @@ export default function QRDashboard() {
               {scans.map((s, i) => (
                 <tr key={s.id}>
                   <td style={{ padding: "10px", borderBottom: i < scans.length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
-                    {s.time_timezone_aware.replace("  ", " ")}
+                    {new Date(s.time_utc).toLocaleString()}
                   </td>
                   <td style={{ padding: "10px", borderBottom: i < scans.length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
                     {s.device}
