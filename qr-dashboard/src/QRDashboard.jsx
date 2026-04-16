@@ -46,10 +46,12 @@ function groupByDate(scans) {
 
 function groupByDevice(scans) {
   const map = {};
+
   scans.forEach((s) => {
     const key = s.device?.split(",")[0] || "Unknown";
     map[key] = (map[key] || 0) + 1;
   });
+
   return Object.entries(map).map(([name, value]) => ({ name, value }));
 }
 
@@ -57,13 +59,18 @@ export default function QRDashboard() {
   const [data, setData] = useState(null);
   const [insights, setInsights] = useState("");
   const [loadingInsights, setLoadingInsights] = useState(false);
+  const [range, setRange] = useState("7");
 
   useEffect(() => {
-    fetch(`${API_URL}/api/scans`)
+    // Clear insights when range changes
+    setInsights("");
+
+    fetch(`${API_URL}/api/scans?range=${range}`)
       .then((r) => r.json())
       .then(setData)
       .catch(console.error);
-  }, []);
+
+  }, [range]);
 
   const scans = data?.results || [];
 
@@ -74,153 +81,166 @@ export default function QRDashboard() {
 
   const uniqueScanners = new Set(scans.map((s) => s.scanner_id)).size;
 
-  const repeatRate = scans.length && data?.count
-    ? ((data.count - uniqueScanners) / data.count * 100).toFixed(1)
-    : "0";
+  const repeatRate =
+    scans.length && data?.count
+      ? ((data.count - uniqueScanners) / data.count) * 100
+      : 0;
 
   const timeData = useMemo(() => groupByDate(scans), [scans]);
   const deviceData = useMemo(() => groupByDevice(scans), [scans]);
 
   const lastScan = sortedScans[0];
 
-  function generateInsights() {
+  async function generateInsights() {
     setLoadingInsights(true);
+    setInsights("");
 
-    fetch(`${API_URL}/api/insights`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ scans }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setInsights(data.insights);
-        setLoadingInsights(false);
-      })
-      .catch(() => setLoadingInsights(false));
+    try {
+      const res = await fetch(
+        `${API_URL}/api/insights?range=${range}&t=${Date.now()}`,
+        { method: "POST" }
+      );
+
+      const data = await res.json();
+      setInsights(data.insights);
+
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingInsights(false);
+    }
   }
 
   return (
-    <div style={{ padding: "2rem", fontFamily: "system-ui" }}>
-      <h1 style={{ marginBottom: "2rem" }}>QR Scan Analytics</h1>
+    <div style={{ padding: "1rem 2rem 2rem", fontFamily: "system-ui" }}>
+      <h1 style={{ marginBottom: "2.5rem" }}>QR Scan Analytics</h1>
+
+      {/* RANGE SELECTOR */}
+      <div style={{ marginBottom: "1rem" }}>
+        <label style={{ fontSize: 13, marginRight: 10 }}>Date Range:</label>
+
+        <select
+          value={range}
+          onChange={(e) => setRange(e.target.value)}
+          style={{ padding: "6px 10px", fontSize: 13 }}
+        >
+          <option value="7">Last 7 Days</option>
+          <option value="30">Last 30 Days</option>
+          <option value="90">Last 90 Days</option>
+          <option value="all">All Time</option>
+        </select>
+      </div>
+
       <p style={{ fontSize: 13, color: "#888", marginBottom: "1.5rem" }}>
-        QR Code <code style={{ fontSize: 12, background: "#f0f0f0", padding: "2px 6px", borderRadius: 4 }}>
+        QR Code{" "}
+        <code style={{ fontSize: 12, background: "#f0f0f0", padding: "2px 6px", borderRadius: 4 }}>
           {scans?.[0]?.qr_code_id}
         </code>
       </p>
 
-      {/* Metrics */}
-      <div style={{ display: "flex", gap: 10, marginBottom: "1.5rem" }}>
-        <MetricCard label="Total Scans" value={data?.count || 0} />
-        <MetricCard label="Unique Scanners" value={uniqueScanners} />
-        <MetricCard label="Repeat Rate" value={`${repeatRate}%`} />
-        <MetricCard
-          label="Last Scan"
-          value={lastScan ? new Date(lastScan.time_utc).toLocaleString() : "—"}
-        />
-      </div>
-
-      {/* AI Insights */}
-      <div style={{ marginBottom: "1.5rem" }}>
-        <button
-          onClick={generateInsights}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 6,
-            border: "none",
-            background: "#378ADD",
-            color: "white",
-            cursor: "pointer",
-            fontSize: "13px",
-            fontWeight: 500,
-            transition: "0.2s ease",
-          }}
-          onMouseOver={(e) => (e.target.style.background = "#2f74c9")}
-          onMouseOut={(e) => (e.target.style.background = "#378ADD")}
-        >
-          Generate AI Insights
-        </button>
-
-        {loadingInsights && <p style={{ marginTop: "0.5rem" }}>Analyzing...</p>}
-
-        {insights && (
-          <div
-            style={{
-              marginTop: 10,
-              fontSize: "13px",
-              lineHeight: 1.6,
-              color: "#333",
-            }}
-            dangerouslySetInnerHTML={{
-              __html: DOMPurify.sanitize(insights),
-            }}
-          />
-        )}
-      </div>
-
-      {/* Charts */}
-      <div style={{ display: "flex", gap: 20, marginBottom: "2rem" }}>
-        <ResponsiveContainer width="50%" height={300}>
-          <BarChart data={timeData}>
-            <XAxis dataKey="date" />
-            <YAxis />
-            <Tooltip />
-            <Bar dataKey="count" fill="#378ADD" />
-          </BarChart>
-        </ResponsiveContainer>
-
-        <ResponsiveContainer width="50%" height={300}>
-          <PieChart>
-            <Pie data={deviceData} dataKey="value">
-              {deviceData.map((_, i) => (
-                <Cell key={i} fill={COLORS[i % COLORS.length]} />
-              ))}
-            </Pie>
-            <Legend />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Table */}
-      <div style={{ border: "0.5px solid #e0e0e0", borderRadius: 12, padding: "1rem 1.25rem" }}>
-        <div style={{ fontWeight: "bold", fontSize: 13, marginBottom: "0.25rem" }}>Scan History</div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr>
-                {["Time", "Device", "Scanner ID", "Location"].map((h) => (
-                  <th key={h} style={{
-                    padding: "8px 10px", fontSize: 11,
-                    fontWeight: 500, textTransform: "uppercase",
-                    letterSpacing: "0.04em", borderBottom: "0.5px solid #e0e0e0"
-                  }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {scans.map((s, i) => (
-                <tr key={s.id}>
-                  <td style={{ padding: "10px", borderBottom: i < scans.length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
-                    {new Date(s.time_utc).toLocaleString()}
-                  </td>
-                  <td style={{ padding: "10px", borderBottom: i < scans.length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
-                    {s.device}
-                  </td>
-                  <td style={{ padding: "10px", borderBottom: i < scans.length - 1 ? "0.5px solid #f0f0f0" : "none" }}>
-                    <span style={{ background: "#E6F1FB", color: "#0C447C", fontSize: 11, padding: "2px 8px", borderRadius: 20 }}>
-                      {s.scanner_id}
-                    </span>
-                  </td>
-                  <td style={{ padding: "10px", borderBottom: i < scans.length - 1 ? "0.5px solid #f0f0f0" : "none", color: "#aaa" }}>
-                    {s.location || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {scans.length === 0 ? (
+        <div style={{ marginTop: 20, color: "#777" }}>
+          No scan data available for this range.
         </div>
-      </div>
+      ) : (
+        <>
+          {/* METRICS */}
+          <div style={{ display: "flex", gap: 10, marginBottom: "1.5rem" }}>
+            <MetricCard label="Total Scans" value={data?.count || 0} />
+            <MetricCard label="Unique Scanners" value={uniqueScanners} />
+            <MetricCard label="Repeat Rate" value={`${repeatRate.toFixed(1)}%`} />
+            <MetricCard
+              label="Last Scan"
+              value={lastScan ? new Date(lastScan.time_utc).toLocaleString() : "—"}
+            />
+          </div>
+
+          {/* CHARTS */}
+          <div style={{ display: "flex", gap: 20, marginBottom: "1.5rem" }}>
+            <ResponsiveContainer width="50%" height={300}>
+              <BarChart data={timeData}>
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="count" fill="#378ADD" />
+              </BarChart>
+            </ResponsiveContainer>
+
+            <ResponsiveContainer width="50%" height={300}>
+              <PieChart>
+                <Pie data={deviceData} dataKey="value">
+                  {deviceData.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* AI INSIGHTS */}
+          <div style={{ marginBottom: "1.5rem" }}>
+            <button
+              onClick={generateInsights}
+              disabled={loadingInsights}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 6,
+                border: "none",
+                background: loadingInsights ? "#999" : "#378ADD",
+                color: "white",
+                cursor: loadingInsights ? "not-allowed" : "pointer",
+                fontSize: "13px",
+              }}
+            >
+              {loadingInsights ? "Analyzing..." : "Generate AI Insights"}
+            </button>
+
+            {insights && (
+              <div
+                style={{ marginTop: 10, fontSize: 13, lineHeight: 1.6 }}
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(insights),
+                }}
+              />
+            )}
+          </div>
+
+          {/* SCAN HISTORY TABLE */}
+          <div style={{ border: "0.5px solid #e0e0e0", borderRadius: 12, padding: "1rem" }}>
+            <div style={{ fontWeight: "bold", fontSize: 13, marginBottom: 10 }}>
+              Scan History
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    {["Time", "Device", "Scanner ID", "Location"].map((h) => (
+                      <th key={h} style={{ padding: "8px 10px", fontSize: 11 }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {sortedScans.map((s) => (
+                    <tr key={s.id}>
+                      <td style={{ padding: 10 }}>
+                        {new Date(s.time_utc).toLocaleString()}
+                      </td>
+                      <td style={{ padding: 10 }}>{s.device}</td>
+                      <td style={{ padding: 10 }}>{s.scanner_id}</td>
+                      <td style={{ padding: 10 }}>{s.location || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
