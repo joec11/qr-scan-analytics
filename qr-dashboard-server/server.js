@@ -26,44 +26,55 @@ app.use(
   })
 );
 
-let cachedInsights = null;
-let lastGenerated = 0;
+let cache = {};
 
 /*
-Fetch scans with range filtering
+Reusable function to fetch QR activity
+*/
+async function fetchQRActivity() {
+  const response = await fetch(
+    `https://hovercode.com/api/v2/hovercode/${QR_CODE_ID}/activity/`,
+    {
+      headers: {
+        Authorization: `Token ${HOVERCODE_API_TOKEN}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text);
+  }
+
+  return response.json();
+}
+
+/*
+Reusable function to filter by range
+*/
+function filterByRange(results, range) {
+  if (range === "all") return results;
+
+  const days = parseInt(range);
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+
+  return results.filter(
+    (s) => new Date(s.time_utc) >= cutoff
+  );
+}
+
+/*
+Fetch scans
 */
 app.get("/api/scans", async (req, res) => {
   try {
     const range = req.query.range || "7";
 
-    const response = await fetch(
-      `https://hovercode.com/api/v2/hovercode/${QR_CODE_ID}/activity/`,
-      {
-        headers: {
-          Authorization: `Token ${HOVERCODE_API_TOKEN}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      const text = await response.text();
-      return res.status(response.status).json({ error: text });
-    }
-
-    const data = await response.json();
-
+    const data = await fetchQRActivity();
     let results = data.results || [];
 
-    if (range !== "all") {
-      const days = parseInt(range);
-
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - days);
-
-      results = results.filter(
-        (s) => new Date(s.time_utc) >= cutoff
-      );
-    }
+    results = filterByRange(results, range);
 
     res.json({
       ...data,
@@ -77,23 +88,32 @@ app.get("/api/scans", async (req, res) => {
 });
 
 /*
-AI insights endpoint
+AI insights
 */
 app.post("/api/insights", async (req, res) => {
   try {
+    const range = req.query.range || "7";
     const now = Date.now();
+    const bypassCache = req.query.t ? true : false;
 
-    if (cachedInsights && now - lastGenerated < 5 * 60 * 1000) {
-      return res.json({ insights: cachedInsights });
+    if (
+      !bypassCache &&
+      cache[range] &&
+      now - cache[range].timestamp < 5 * 60 * 1000
+    ) {
+      return res.json({ insights: cache[range].data });
     }
 
-    const { scans } = req.body;
+    const data = await fetchQRActivity();
+    let results = data.results || [];
 
-    if (!scans || scans.length === 0) {
+    results = filterByRange(results, range);
+
+    if (results.length === 0) {
       return res.json({ insights: "No scan data available." });
     }
 
-    const simplified = scans.slice(0, 100).map((s) => ({
+    const simplified = results.slice(0, 100).map((s) => ({
       time: new Date(s.time_utc).toLocaleString(),
       device: s.device,
     }));
@@ -150,8 +170,10 @@ ${JSON.stringify(simplified)}
 
     const insights = result.text || "AI unavailable";
 
-    cachedInsights = insights;
-    lastGenerated = now;
+    cache[range] = {
+      data: insights,
+      timestamp: now,
+    };
 
     res.json({ insights });
 

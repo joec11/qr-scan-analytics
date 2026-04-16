@@ -59,14 +59,17 @@ export default function QRDashboard() {
   const [data, setData] = useState(null);
   const [insights, setInsights] = useState("");
   const [loadingInsights, setLoadingInsights] = useState(false);
-
   const [range, setRange] = useState("7");
 
   useEffect(() => {
+    // Clear insights when range changes
+    setInsights("");
+
     fetch(`${API_URL}/api/scans?range=${range}`)
       .then((r) => r.json())
       .then(setData)
       .catch(console.error);
+
   }, [range]);
 
   const scans = data?.results || [];
@@ -88,26 +91,28 @@ export default function QRDashboard() {
 
   const lastScan = sortedScans[0];
 
-  function generateInsights() {
+  async function generateInsights() {
     setLoadingInsights(true);
+    setInsights("");
 
-    fetch(`${API_URL}/api/insights`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ scans }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setInsights(data.insights);
-        setLoadingInsights(false);
-      })
-      .catch(() => setLoadingInsights(false));
+    try {
+      const res = await fetch(
+        `${API_URL}/api/insights?range=${range}&t=${Date.now()}`,
+        { method: "POST" }
+      );
+
+      const data = await res.json();
+      setInsights(data.insights);
+
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingInsights(false);
+    }
   }
 
   return (
-    <div style={{ padding: "2rem", fontFamily: "system-ui" }}>
+    <div style={{ padding: "1rem 2rem 2rem", fontFamily: "system-ui" }}>
       <h1 style={{ marginBottom: "2.5rem" }}>QR Scan Analytics</h1>
 
       {/* RANGE SELECTOR */}
@@ -150,6 +155,29 @@ export default function QRDashboard() {
             />
           </div>
 
+          {/* CHARTS */}
+          <div style={{ display: "flex", gap: 20, marginBottom: "1.5rem" }}>
+            <ResponsiveContainer width="50%" height={300}>
+              <BarChart data={timeData}>
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="count" fill="#378ADD" />
+              </BarChart>
+            </ResponsiveContainer>
+
+            <ResponsiveContainer width="50%" height={300}>
+              <PieChart>
+                <Pie data={deviceData} dataKey="value">
+                  {deviceData.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
           {/* AI INSIGHTS */}
           <div style={{ marginBottom: "1.5rem" }}>
             <button
@@ -178,30 +206,7 @@ export default function QRDashboard() {
             )}
           </div>
 
-          {/* CHARTS */}
-          <div style={{ display: "flex", gap: 20, marginBottom: "2rem" }}>
-            <ResponsiveContainer width="50%" height={300}>
-              <BarChart data={timeData}>
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="count" fill="#378ADD" />
-              </BarChart>
-            </ResponsiveContainer>
-
-            <ResponsiveContainer width="50%" height={300}>
-              <PieChart>
-                <Pie data={deviceData} dataKey="value">
-                  {deviceData.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* TABLE */}
+          {/* SCAN HISTORY TABLE */}
           <div style={{ border: "0.5px solid #e0e0e0", borderRadius: 12, padding: "1rem" }}>
             <div style={{ fontWeight: "bold", fontSize: 13, marginBottom: 10 }}>
               Scan History
@@ -231,7 +236,6 @@ export default function QRDashboard() {
                     </tr>
                   ))}
                 </tbody>
-
               </table>
             </div>
           </div>
