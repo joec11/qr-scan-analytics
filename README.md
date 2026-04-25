@@ -10,6 +10,22 @@ The QR Scan Analytics Dashboard enables real-time monitoring of QR code usage th
 
 ---
 
+## Screenshots
+
+### Dashboard Overview
+![Dashboard](./screenshots/dashboard.png)
+
+### Date Range Filtering (Last 30 Days)
+![Date Range (Last 30 Days)](./screenshots/date-range-last-30-days.png)
+
+### AI Insights
+![AI Insights](./screenshots/ai-insights.png)
+
+### Scan History
+![Scan History](./screenshots/scan-history.png)
+
+---
+
 ## Key Features
 
 - Real-time QR scan analytics
